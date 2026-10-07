@@ -2,8 +2,15 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 
+let privateKey: string | undefined;
+
 function getPrivateKey(): string {
-  const keyPath = process.env.LOGIN_PRIVATE_KEY_PATH;
+  if (privateKey) {
+    return privateKey;
+  }
+
+  const keyPath =
+    process.env.LOGIN_PRIVATE_KEY_PATH;
 
   if (!keyPath) {
     throw new Error(
@@ -11,23 +18,27 @@ function getPrivateKey(): string {
     );
   }
 
-  return fs.readFileSync(
-    path.resolve(process.cwd(), keyPath),
+  privateKey = fs.readFileSync(
+    path.resolve(
+      process.cwd(),
+      keyPath
+    ),
     "utf8"
   );
+
+  return privateKey;
 }
 
 export function decryptLoginPassword(
   encryptedPassword: string
 ): string {
-  const privateKey = getPrivateKey();
-
   return crypto
     .privateDecrypt(
       {
-        key: privateKey,
+        key: getPrivateKey(),
         padding:
-          crypto.constants.RSA_PKCS1_OAEP_PADDING,
+          crypto.constants
+            .RSA_PKCS1_OAEP_PADDING,
         oaepHash: "sha256",
       },
       Buffer.from(

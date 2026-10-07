@@ -54,8 +54,7 @@ export async function GET(
     // AUTHENTICATION
     // =====================================================
 
-    const user =
-      await getAuthenticatedUser();
+    const user = await getAuthenticatedUser();
 
     if (!user) {
       return NextResponse.json(
@@ -72,8 +71,7 @@ export async function GET(
     // VOUCHER NUMBER
     // =====================================================
 
-    const { voucherNumber } =
-      await context.params;
+    const { voucherNumber } = await context.params;
 
     const cleanVoucherNumber =
       voucherNumber?.trim();
@@ -83,50 +81,36 @@ export async function GET(
         {
           success: false,
           error: "INVALID_VOUCHER_NUMBER",
-          message:
-            "Voucher number is required",
+          message: "Voucher number is required",
         },
         { status: 400 }
       );
     }
 
-    if (
-      cleanVoucherNumber.length > 100
-    ) {
+    if (cleanVoucherNumber.length > 100) {
       return NextResponse.json(
         {
           success: false,
           error: "INVALID_VOUCHER_NUMBER",
-          message:
-            "Voucher number is too long",
+          message: "Voucher number is too long",
         },
         { status: 400 }
       );
     }
 
     // =====================================================
-    // CREATE SINGLE PROCESSING RECORD
+    // CREATE PROCESSING RECORD
     // =====================================================
 
     jobId = `SINGLE-${randomUUID()}`;
 
     await createProcessingRecord({
       jobId,
-
-      userId:
-        user.userId,
-
-      sourceFileName:
-        cleanVoucherNumber,
-
-      sourceFileType:
-        "SINGLE_VOUCHER",
-
-      processingType:
-        "SINGLE",
-
-      voucherNumber:
-        cleanVoucherNumber,
+      userId: user.userId,
+      sourceFileName: cleanVoucherNumber,
+      sourceFileType: "SINGLE_VOUCHER",
+      processingType: "SINGLE",
+      voucherNumber: cleanVoucherNumber,
     });
 
     processingRecordCreated = true;
@@ -149,17 +133,11 @@ export async function GET(
         jobId,
         {
           totalInvoices: 1,
-
           successfulInvoices: 0,
-
           failedInvoices: 1,
-
           duplicateInvoices: 0,
-
           totalFiles: 0,
-
           status: "FAILED",
-
           errorMessage:
             "No documents found for this voucher number",
         }
@@ -179,97 +157,28 @@ export async function GET(
     }
 
     // =====================================================
-    // SINGLE FILE → PDF
+    // ALWAYS CREATE ZIP
+    //
+    // Single file ho ya multiple files,
+    // hamesha ZIP return hoga.
+    //
+    // Repository NULL/0 byte FILE_DATA ko
+    // Buffer.alloc(0) ke form mein return karega,
+    // isliye woh file bhi ZIP mein rahegi.
     // =====================================================
 
-    if (files.length === 1) {
-      const file = files[0];
+    const zipFiles = files.map((file) => ({
+      folderName: cleanVoucherNumber,
+      fileName: sanitizeDownloadFileName(
+        file.fileName
+      ),
+      fileData: file.fileData,
+    }));
 
-      const fileName =
-        sanitizeDownloadFileName(
-          file.fileName
-        );
-
-      await updateProcessingRecord(
-        jobId,
-        {
-          totalInvoices: 1,
-
-          successfulInvoices: 1,
-
-          failedInvoices: 0,
-
-          duplicateInvoices: 0,
-
-          totalFiles: 1,
-
-          status: "COMPLETED",
-
-          errorMessage: "NONE",
-        }
-      );
-
-      processingRecordCreated = false;
-
-      const response =
-        new NextResponse(
-          new Uint8Array(
-            file.fileData
-          )
-        );
-
-      response.headers.set(
-        "Content-Type",
-        "application/pdf"
-      );
-
-      response.headers.set(
-        "Content-Disposition",
-        `attachment; filename="${fileName}"`
-      );
-
-      response.headers.set(
-        "Cache-Control",
-        "no-store"
-      );
-
-      response.headers.set(
-        "X-Voucher-Number",
-        cleanVoucherNumber
-      );
-
-      response.headers.set(
-        "X-Total-Files",
-        "1"
-      );
-
-      return response;
-    }
-
-    // =====================================================
-    // MULTIPLE FILES → ZIP
-    // =====================================================
-
-    const zipFiles =
-      files.map((file) => ({
-        folderName:
-          cleanVoucherNumber,
-
-        fileName:
-          file.fileName,
-
-        fileData:
-          file.fileData,
-      }));
-
-    let zipStream:
-      ReadableStream<Uint8Array>;
+    let zipStream: ReadableStream<Uint8Array>;
 
     try {
-      zipStream =
-        createVoucherZip(
-          zipFiles
-        );
+      zipStream = createVoucherZip(zipFiles);
     } catch (error) {
       console.error(
         "Single voucher ZIP generation error:",
@@ -281,43 +190,35 @@ export async function GET(
           ? error.message
           : "ZIP_GENERATION_FAILED";
 
+      // ===================================================
+      // ZIP LIMIT ERRORS
+      // ===================================================
+
       if (
-        errorCode ===
-          "TOO_MANY_ZIP_FILES" ||
-        errorCode ===
-          "ZIP_CONTENT_TOO_LARGE"
+        errorCode === "TOO_MANY_ZIP_FILES" ||
+        errorCode === "ZIP_CONTENT_TOO_LARGE"
       ) {
         await updateProcessingRecord(
           jobId,
           {
             totalInvoices: 1,
-
             successfulInvoices: 0,
-
             failedInvoices: 1,
-
             duplicateInvoices: 0,
-
-            totalFiles:
-              files.length,
-
+            totalFiles: files.length,
             status: "FAILED",
-
-            errorMessage:
-              errorCode,
+            errorMessage: errorCode,
           }
         );
 
-        processingRecordCreated =
-          false;
+        processingRecordCreated = false;
 
         return NextResponse.json(
           {
             success: false,
             error: errorCode,
             message:
-              errorCode ===
-              "TOO_MANY_ZIP_FILES"
+              errorCode === "TOO_MANY_ZIP_FILES"
                 ? "Too many files found for download"
                 : "Total file size is too large for download",
           },
@@ -325,35 +226,30 @@ export async function GET(
         );
       }
 
+      // ===================================================
+      // OTHER ZIP ERRORS
+      // ===================================================
+
       await updateProcessingRecord(
         jobId,
         {
           totalInvoices: 1,
-
           successfulInvoices: 0,
-
           failedInvoices: 1,
-
           duplicateInvoices: 0,
-
-          totalFiles:
-            files.length,
-
+          totalFiles: files.length,
           status: "FAILED",
-
           errorMessage:
             "ZIP_GENERATION_FAILED",
         }
       );
 
-      processingRecordCreated =
-        false;
+      processingRecordCreated = false;
 
       return NextResponse.json(
         {
           success: false,
-          error:
-            "ZIP_GENERATION_FAILED",
+          error: "ZIP_GENERATION_FAILED",
           message:
             "Unable to generate download file",
         },
@@ -362,25 +258,18 @@ export async function GET(
     }
 
     // =====================================================
-    // MARK SINGLE SEARCH AS COMPLETED
+    // MARK PROCESSING AS COMPLETED
     // =====================================================
 
     await updateProcessingRecord(
       jobId,
       {
         totalInvoices: 1,
-
         successfulInvoices: 1,
-
         failedInvoices: 0,
-
         duplicateInvoices: 0,
-
-        totalFiles:
-          files.length,
-
+        totalFiles: files.length,
         status: "COMPLETED",
-
         errorMessage: "NONE",
       }
     );
@@ -392,9 +281,7 @@ export async function GET(
     // =====================================================
 
     const response =
-      new NextResponse(
-        zipStream
-      );
+      new NextResponse(zipStream);
 
     response.headers.set(
       "Content-Type",
@@ -441,17 +328,11 @@ export async function GET(
           jobId,
           {
             totalInvoices: 1,
-
             successfulInvoices: 0,
-
             failedInvoices: 1,
-
             duplicateInvoices: 0,
-
             totalFiles: 0,
-
             status: "FAILED",
-
             errorMessage:
               "INTERNAL_SERVER_ERROR",
           }
@@ -467,8 +348,7 @@ export async function GET(
     return NextResponse.json(
       {
         success: false,
-        error:
-          "INTERNAL_SERVER_ERROR",
+        error: "INTERNAL_SERVER_ERROR",
         message:
           "Unable to retrieve voucher documents",
       },

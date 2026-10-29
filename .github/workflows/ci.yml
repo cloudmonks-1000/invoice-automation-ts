@@ -55,3 +55,6 @@ jobs:
         run: npm run build
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_PASSWORD: ${{ secrets.ORACLE_PASSWORD }}
+          ORACLE_CONNECTION_STRING: ${{ secrets.ORACLE_CONNECTION_STRING }}

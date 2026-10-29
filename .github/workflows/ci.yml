@@ -41,6 +41,16 @@ jobs:
       - name: Run tests
         run: npm test --if-present
 
+      - name: Verify JWT configuration
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          if [ -z "$JWT_SECRET" ]; then
+            echo "::error::JWT_SECRET is missing from GitHub Actions secrets"
+            exit 1
+          fi
+          echo "JWT_SECRET is configured."
+
       - name: Build application
         run: npm run build
         env:
